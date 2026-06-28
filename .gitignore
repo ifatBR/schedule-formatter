@@ -1,0 +1,12 @@
+data/input/*
+data/output/*
+
+!data/input/.gitkeep
+!data/output/.gitkeep
+
+.n8n/
+
+.DS_Store
+
+node_modules/
+.env
