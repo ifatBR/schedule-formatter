@@ -1,0 +1,337 @@
+{
+  "name": "Schedule Formatter",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "1mv9h7l-Ma_2M0ofwHSb6PPJoZEynEghj",
+          "mode": "list",
+          "cachedResultName": "Schedules Demo",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/1mv9h7l-Ma_2M0ofwHSb6PPJoZEynEghj"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [0, 0],
+      "id": "039f3060-cd9c-4232-9a85-77ad4ba710a9",
+      "name": "Google Drive Trigger",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YFMawqpDkDzY10pS",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $json.id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [208, 0],
+      "id": "a77ac07b-df5d-433d-b5c1-410c155c6d79",
+      "name": "Download file",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YFMawqpDkDzY10pS",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [416, 0],
+      "id": "d86012ef-aada-42e3-a0a5-8d89d6ce6a85",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "YOUR_ANTHROPIC_API_KEY"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            },
+            {}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 1000,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"You are a data normalization assistant. I have a spreadsheet with these column names: {{ $json.columns.join(', ') }}. Map them to this target schema: category, family, type, mark, level, material, quantity, diameter, insulated, notes. Return ONLY a JSON object where keys are my original column names and values are the target schema field names. If a column doesn't map to anything, set its value to null.\"\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [832, 0],
+      "id": "c85385a6-ac67-49a0-b8a9-0d66e329e58f",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "const firstRow = $input.first().json;\nconst columnNames = Object.keys(firstRow);\n\nreturn [{ json: { columns: columnNames } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [624, 0],
+      "id": "c43566bd-058d-4f83-bbcd-7fa946867b48",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst content = response.content[0].text;\n\n// Strip markdown code block if present\nconst cleaned = content.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n\n// Remove any text after the closing brace\nconst jsonMatch = cleaned.match(/\\{[\\s\\S]*\\}/);\nconst mapping = JSON.parse(jsonMatch[0]);\n\nreturn [{ json: { mapping } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1040, 0],
+      "id": "f7f1b4ef-1ba7-4ab1-ad9b-c975ed1290be",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [1248, 0],
+      "id": "90906bcc-761e-4614-95b2-dd1f2264604a",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst normalized = [];\n\nfor (const item of items) {\n  const row = item.json;\n  \n  // Find the mapping object (the one that has a 'mapping' key)\n  const mapping = row.mapping;\n  \n  if (!mapping) continue;\n  \n  const normalizedRow = {};\n  \n  for (const [originalCol, targetCol] of Object.entries(mapping)) {\n    if (targetCol && row[originalCol] !== undefined) {\n      // If target field already exists, concatenate\n      if (normalizedRow[targetCol]) {\n        normalizedRow[targetCol] = `${normalizedRow[targetCol]}, ${row[originalCol]}`;\n      } else {\n        normalizedRow[targetCol] = row[originalCol];\n      }\n    }\n  }\n  \n  normalized.push({ json: normalizedRow });\n}\n\nreturn normalized;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1456, 0],
+      "id": "c42c55b0-2236-47c9-a992-f040aa3fbe72",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "operation": "xlsx",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [1664, 0],
+      "id": "5c86eb17-71de-4f97-b0ce-abea59e8df61",
+      "name": "Convert to File"
+    },
+    {
+      "parameters": {
+        "name": "={{ $('Google Drive Trigger').item.json.name.replace('.xlsx', '') }}_formatted.xlsx",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "1Gw-nmjDoDuCdziw-r2hS9zMERgxeIQn1",
+          "mode": "list",
+          "cachedResultName": "Formatted Schedules",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/1Gw-nmjDoDuCdziw-r2hS9zMERgxeIQn1"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [1840, 0],
+      "id": "af5cde4a-888d-43bb-a9ba-476c56ab468c",
+      "name": "Upload file",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YFMawqpDkDzY10pS",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "ifat.3d@gmail.com",
+        "subject": "Schedule file formatted",
+        "message": "=Your schedule file has been processed and saved to Google Drive.\n\n<br><br> Original file: {{ $('Google Drive Trigger').item.json.name }}\n<br> Formatted file: {{ $('Upload file').item.json.name }} is formatted and ready for review.",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [2048, 0],
+      "id": "bc1bccd2-cc3d-4e51-b8d5-1e040d3d2294",
+      "name": "Send a message",
+      "webhookId": "94c03ea9-138c-496b-9088-5dc9e2262422",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "9z9rGzD3bSvkQKGT",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Google Drive Trigger": {
+      "main": [
+        [
+          {
+            "node": "Download file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download file": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Convert to File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to File": {
+      "main": [
+        [
+          {
+            "node": "Upload file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload file": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "c5d3b7d5-b5c1-4f74-bcd1-babecb57b5f0",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b8f9548754d1e8a290818187661ab56af960a63e81f6c28e4348af92037f9abb"
+  },
+  "nodeGroups": [],
+  "id": "M6F3i43efRZ5e3ax",
+  "tags": []
+}
